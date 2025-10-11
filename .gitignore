@@ -1,0 +1,14 @@
+.env
+*.session
+*.session-journal
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+voice_messages/
+*.ogg
+*.mp3
+.venv/
+venv/
+env/
