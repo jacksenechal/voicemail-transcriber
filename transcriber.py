@@ -197,21 +197,33 @@ async def handle_new_message(event):
 
         # Split into chunks if needed (Telegram has 4096 char limit)
         reply_header = "🎤 Voice message transcription:\n\n"
-        full_text = reply_header + transcription
-        message_chunks = split_message(full_text, max_length=4096)
+        if len(reply_header + transcription) <= 4096:
+            # Short message, send as single reply
+            await message.reply(reply_header + transcription)
+            logger.info("Transcription sent successfully (1 message)")
+        else:
+            # Long message, need to split
+            # We need to reserve space for headers:
+            # - First chunk needs space for reply_header
+            # - Subsequent chunks need space for continuation_header
+            continuation_header = "🎤 (continued):\n\n"
+            max_header_len = max(len(reply_header), len(continuation_header))
 
-        logger.info(f"Sending transcription in {len(message_chunks)} message(s)")
+            # Split transcription into chunks, reserving space for the longest header
+            transcription_chunks = split_message(transcription, max_length=4096 - max_header_len)
 
-        # Send first message as a reply, rest as regular messages
-        for i, chunk in enumerate(message_chunks):
-            if i == 0:
-                await message.reply(chunk)
-            else:
-                # For continuation messages, add a header
-                continuation = f"🎤 (continued {i+1}/{len(message_chunks)}):\n\n{chunk}"
+            logger.info(f"Sending transcription in {len(transcription_chunks)} message(s)")
+
+            # Send first message with main header
+            first_message = reply_header + transcription_chunks[0]
+            await message.reply(first_message)
+
+            # Send continuation messages
+            for i in range(1, len(transcription_chunks)):
+                continuation = continuation_header + transcription_chunks[i]
                 await message.reply(continuation)
 
-        logger.info(f"Transcription sent successfully ({len(message_chunks)} message(s))")
+            logger.info(f"Transcription sent successfully ({len(transcription_chunks)} message(s))")
 
     except Exception as e:
         logger.error(f"Error processing voice message: {e}", exc_info=True)
