@@ -12,16 +12,17 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument, DocumentAttributeAudio
-import openai
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
 
 # Configuration
-API_ID = int(os.getenv('TELEGRAM_API_ID'))
-API_HASH = os.getenv('TELEGRAM_API_HASH')
-PHONE = os.getenv('TELEGRAM_PHONE')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+API_ID = int(os.getenv('TELEGRAM_API_ID', '0'))
+API_HASH = os.getenv('TELEGRAM_API_HASH', '')
+PHONE = os.getenv('TELEGRAM_PHONE', '')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+MODE = os.getenv('MODE', 'production').lower()  # test or production
 
 # Setup logging
 logging.basicConfig(
@@ -31,8 +32,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-openai.api_key = OPENAI_API_KEY
+# OpenAI client - initialized lazily
+openai_client = None
+
+
+def get_openai_client():
+    """Get or create OpenAI client."""
+    global openai_client
+    if openai_client is None and MODE != 'test':
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return openai_client
 
 # Create directory for temporary voice files
 VOICE_DIR = Path('voice_messages')
@@ -49,8 +58,16 @@ async def transcribe_audio(file_path: str) -> str:
     """Transcribe audio file using OpenAI Whisper API."""
     try:
         logger.info(f"Transcribing {file_path}...")
+
+        # Test mode: return mock transcription
+        if MODE == 'test':
+            logger.info("TEST MODE: Returning mock transcription")
+            return "[TEST MODE] This is a mock transcription of the voice message."
+
+        # Production mode: use real API
+        client = get_openai_client()
         with open(file_path, 'rb') as audio_file:
-            transcript = openai.audio.transcriptions.create(
+            transcript = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 response_format="text"
@@ -142,6 +159,11 @@ async def handle_new_message(event):
 async def main():
     """Main function to start the bot."""
     logger.info("Starting Telegram Voice Transcriber...")
+
+    if MODE == 'test':
+        logger.info("Running in TEST mode - API calls will be mocked")
+    else:
+        logger.info("Running in PRODUCTION mode")
 
     # Start client
     await client.start(phone=PHONE)

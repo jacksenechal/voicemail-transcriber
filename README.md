@@ -53,12 +53,61 @@ Fill in your credentials:
 - `TELEGRAM_API_HASH`: Your Telegram API hash
 - `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
 - `OPENAI_API_KEY`: Your OpenAI API key
+- `MODE`: Set to `test` or `production` (default: `production`)
 
-### 5. Run the Agent
+### 5. Run Tests
 
-**Direct run:**
+Before running in production, validate the critical path with tests:
+
 ```bash
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_voice_detection.py
+
+# Run with coverage report
+pytest --cov=transcriber --cov-report=html
+```
+
+The test suite covers:
+- ✅ Voice message detection logic
+- ✅ Audio transcription with mocked API calls
+- ✅ Message handling flow (download, transcribe, reply)
+- ✅ Error handling and duplicate prevention
+- ✅ Edge cases (non-voice messages, API failures)
+
+### 6. Run the Agent
+
+#### Test Mode (Safe Testing with Real Telegram)
+
+Test mode connects to your real Telegram account but uses mock transcriptions instead of calling the OpenAI API. This lets you validate the full flow without incurring API costs.
+
+```bash
+# Set MODE=test in your .env file, or:
+MODE=test python transcriber.py
+```
+
+In test mode:
+- ✅ Connects to real Telegram account
+- ✅ Detects real voice messages
+- ✅ Downloads voice files
+- ✅ Replies with mock transcriptions
+- ❌ Does NOT call OpenAI API (no costs)
+
+You'll see `[TEST MODE]` prefix in transcription replies.
+
+#### Production Mode (Live Transcription)
+
+```bash
+# Direct run
 python transcriber.py
+
+# Or explicitly set production mode
+MODE=production python transcriber.py
 ```
 
 **Run in tmux (recommended for persistence):**
@@ -119,12 +168,26 @@ The session will be saved in `transcriber_session.session` for future runs.
 
 **"No voice messages detected"**: The agent only detects voice messages sent AFTER it starts running
 
+## Testing Strategy
+
+This project includes comprehensive tests to validate the critical path:
+
+1. **Unit Tests** (`tests/test_voice_detection.py`): Tests voice message detection logic with various message types
+2. **Transcription Tests** (`tests/test_transcription.py`): Tests OpenAI API integration with mocks
+3. **Integration Tests** (`tests/test_message_handling.py`): Tests the full message handling flow
+
+**Recommended workflow:**
+1. Run `pytest` to validate all tests pass
+2. Run in test mode (`MODE=test`) to verify end-to-end flow with your real Telegram account
+3. Deploy to production mode (`MODE=production`) once validated
+
 ## Notes
 
 - Voice messages are temporarily downloaded to `voice_messages/` and deleted after transcription
 - The agent keeps track of processed messages to avoid duplicate transcriptions
 - Whisper API supports 100+ languages automatically
 - Cost: ~$0.006 per minute of audio transcribed
+- Use test mode to validate functionality without API costs
 
 ## License
 
