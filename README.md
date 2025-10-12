@@ -188,6 +188,9 @@ This project includes comprehensive tests to validate the critical path:
 - Whisper API supports 100+ languages automatically
 - Cost: ~$0.006 per minute of audio transcribed
 - Use test mode to validate functionality without API costs
+- **Long transcriptions**: Automatically splits messages over 4096 characters (Telegram's limit) into multiple replies
+- **Comprehensive logging**: All errors, downloads, and transcriptions are logged with full context
+- **Error handling**: Graceful fallbacks for API failures, network issues, and edge cases
 
 ## License
 

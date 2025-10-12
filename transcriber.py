@@ -96,6 +96,56 @@ async def is_voice_message(message) -> bool:
     return False
 
 
+def split_message(text: str, max_length: int = 4096) -> list[str]:
+    """Split a long message into chunks that fit Telegram's message length limit.
+
+    Telegram has a 4096 character limit per message. This function splits
+    the text intelligently at paragraph/sentence boundaries when possible.
+    """
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    current_chunk = ""
+
+    # Try to split at paragraph boundaries first
+    paragraphs = text.split('\n\n')
+
+    for paragraph in paragraphs:
+        # If adding this paragraph would exceed the limit
+        if len(current_chunk) + len(paragraph) + 2 > max_length:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+
+            # If a single paragraph is too long, split it by words
+            if len(paragraph) > max_length:
+                words = paragraph.split(' ')
+                for word in words:
+                    # If a single word is too long, split it forcefully
+                    if len(word) > max_length:
+                        for i in range(0, len(word), max_length):
+                            chunks.append(word[i:i+max_length])
+                        continue
+
+                    # If adding this word would exceed limit
+                    if len(current_chunk) + len(word) + 1 > max_length:
+                        if current_chunk:
+                            chunks.append(current_chunk.strip())
+                        current_chunk = word
+                    else:
+                        current_chunk += (" " if current_chunk else "") + word
+            else:
+                current_chunk = paragraph
+        else:
+            current_chunk += ("\n\n" if current_chunk else "") + paragraph
+
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+
+    return chunks
+
+
 @client.on(events.NewMessage)
 async def handle_new_message(event):
     """Handle incoming messages and transcribe voice messages."""
@@ -125,6 +175,7 @@ async def handle_new_message(event):
 
     logger.info(f"Voice message detected in '{chat_name}' from {sender_name}")
 
+    file_path = None
     try:
         # Download voice message
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -132,28 +183,53 @@ async def handle_new_message(event):
 
         logger.info("Downloading voice message...")
         await message.download_media(file=str(file_path))
+        logger.info(f"Downloaded to {file_path}")
 
         # Transcribe
         transcription = await transcribe_audio(str(file_path))
+        logger.info(f"Transcription completed: {len(transcription)} characters")
 
-        # Reply with transcription
-        reply_text = f"🎤 Voice message transcription:\n\n{transcription}"
-        await message.reply(reply_text)
+        # Check if transcription failed
+        if transcription.startswith("[Transcription failed:"):
+            logger.error(f"Transcription failed: {transcription}")
+            await message.reply(f"❌ {transcription}")
+            return
 
-        logger.info(f"Transcription sent successfully")
+        # Split into chunks if needed (Telegram has 4096 char limit)
+        reply_header = "🎤 Voice message transcription:\n\n"
+        full_text = reply_header + transcription
+        message_chunks = split_message(full_text, max_length=4096)
 
-        # Clean up audio file
-        try:
-            file_path.unlink()
-        except:
-            pass
+        logger.info(f"Sending transcription in {len(message_chunks)} message(s)")
+
+        # Send first message as a reply, rest as regular messages
+        for i, chunk in enumerate(message_chunks):
+            if i == 0:
+                await message.reply(chunk)
+            else:
+                # For continuation messages, add a header
+                continuation = f"🎤 (continued {i+1}/{len(message_chunks)}):\n\n{chunk}"
+                await message.reply(continuation)
+
+        logger.info(f"Transcription sent successfully ({len(message_chunks)} message(s))")
 
     except Exception as e:
-        logger.error(f"Error processing voice message: {e}")
+        logger.error(f"Error processing voice message: {e}", exc_info=True)
         try:
-            await message.reply(f"❌ Failed to transcribe voice message: {str(e)}")
-        except:
-            pass
+            error_msg = f"❌ Failed to transcribe voice message: {str(e)}"
+            await message.reply(error_msg)
+            logger.info("Error notification sent to user")
+        except Exception as reply_error:
+            logger.error(f"Failed to send error notification: {reply_error}", exc_info=True)
+
+    finally:
+        # Clean up audio file
+        if file_path and file_path.exists():
+            try:
+                file_path.unlink()
+                logger.debug(f"Cleaned up audio file: {file_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up audio file {file_path}: {cleanup_error}")
 
 
 async def main():

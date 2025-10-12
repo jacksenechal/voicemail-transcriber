@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pytest:*)",
+      "Bash(source:*)",
+      "Bash(python -m pytest -v)",
+      "Bash(python -m pytest --tb=short -q)",
+      "Bash(MODE=test python transcriber.py)",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
