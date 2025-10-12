@@ -23,6 +23,7 @@ API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 PHONE = os.getenv('TELEGRAM_PHONE', '')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 MODE = os.getenv('MODE', 'production').lower()  # test or production
+FORMAT_TRANSCRIPTIONS = os.getenv('FORMAT_TRANSCRIPTIONS', 'true').lower() == 'true'
 
 # Setup logging
 logging.basicConfig(
@@ -52,6 +53,56 @@ client = TelegramClient('transcriber_session', API_ID, API_HASH)
 
 # Track processed messages to avoid duplicates
 processed_messages = set()
+
+
+async def format_transcription(text: str) -> str:
+    """Format transcription by adding appropriate paragraph breaks using LLM.
+
+    Takes a wall-of-text transcription and uses GPT-4o-mini to intelligently
+    add paragraph breaks at natural topic boundaries.
+    """
+    try:
+        logger.info(f"Formatting transcription ({len(text)} chars)...")
+
+        # Test mode: return unformatted
+        if MODE == 'test':
+            logger.info("TEST MODE: Skipping formatting")
+            return text
+
+        # Skip formatting if disabled
+        if not FORMAT_TRANSCRIPTIONS:
+            logger.info("Formatting disabled, returning raw transcription")
+            return text
+
+        # Skip if transcription is already short (likely already readable)
+        if len(text) < 200:
+            logger.info("Transcription too short to need formatting")
+            return text
+
+        client = get_openai_client()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a text formatter. Add paragraph breaks (\\n\\n) to transcriptions at natural topic boundaries. Preserve the exact text - only add line breaks. Do not add any commentary, explanations, or markdown formatting. Return ONLY the formatted text."
+                },
+                {
+                    "role": "user",
+                    "content": f"Format this voice message transcription by adding paragraph breaks at natural topic boundaries:\n\n{text}"
+                }
+            ],
+            temperature=0.1,
+            max_tokens=4096
+        )
+
+        formatted = response.choices[0].message.content.strip()
+        logger.info(f"Formatting completed ({len(formatted)} chars)")
+        return formatted
+
+    except Exception as e:
+        logger.warning(f"Formatting failed, returning raw transcription: {e}")
+        return text  # Fallback to unformatted on error
 
 
 async def transcribe_audio(file_path: str) -> str:
@@ -194,6 +245,9 @@ async def handle_new_message(event):
             logger.error(f"Transcription failed: {transcription}")
             await message.reply(f"❌ {transcription}")
             return
+
+        # Format transcription with paragraph breaks
+        transcription = await format_transcription(transcription)
 
         # Split into chunks if needed (Telegram has 4096 char limit)
         reply_header = "🎤 Voice message transcription:\n\n"

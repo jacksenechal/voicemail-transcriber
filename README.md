@@ -7,7 +7,9 @@ An agent that monitors your Telegram account for voice messages in any chat (inc
 - 🎤 Detects voice messages in all chats
 - 🔄 Monitors both incoming and outgoing voice messages
 - 🤖 Transcribes using OpenAI Whisper (best-in-class STT)
+- 📝 **Smart formatting**: Automatically adds paragraph breaks using GPT-4o-mini for readability
 - 💬 Replies with transcription attached to the original voice message
+- 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
 - 🛡️ Handles errors gracefully with logging
 
@@ -54,6 +56,7 @@ Fill in your credentials:
 - `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
 - `OPENAI_API_KEY`: Your OpenAI API key
 - `MODE`: Set to `test` or `production` (default: `production`)
+- `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
 
 ### 5. Run Tests
 
@@ -186,8 +189,16 @@ This project includes comprehensive tests to validate the critical path:
 - Voice messages are temporarily downloaded to `voice_messages/` and deleted after transcription
 - The agent keeps track of processed messages to avoid duplicate transcriptions
 - Whisper API supports 100+ languages automatically
-- Cost: ~$0.006 per minute of audio transcribed
+- **Costs**:
+  - Whisper transcription: ~$0.006 per minute of audio
+  - GPT-4o-mini formatting: ~$0.0001 per transcription (negligible)
+  - Total: ~$0.006 per voice message
 - Use test mode to validate functionality without API costs
+- **Smart formatting**: Uses GPT-4o-mini to intelligently add paragraph breaks at natural topic boundaries
+  - Automatically enabled by default
+  - Can be disabled with `FORMAT_TRANSCRIPTIONS=false`
+  - Falls back to raw transcription if formatting fails
+  - Skips transcriptions under 200 characters (already readable)
 - **Long transcriptions**: Automatically splits messages over 4096 characters (Telegram's limit) into multiple replies
 - **Comprehensive logging**: All errors, downloads, and transcriptions are logged with full context
 - **Error handling**: Graceful fallbacks for API failures, network issues, and edge cases
