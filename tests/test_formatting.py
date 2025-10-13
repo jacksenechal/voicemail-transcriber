@@ -125,6 +125,6 @@ async def test_format_transcription_model_params():
         call_args = mock_client.chat.completions.create.call_args
         assert call_args[1]['model'] == 'gpt-5-nano'
         assert 'temperature' not in call_args[1]  # gpt-5-nano doesn't support temperature
-        assert call_args[1]['max_completion_tokens'] == 4096
+        assert 'max_completion_tokens' not in call_args[1]  # No limit - let model stop naturally
         assert len(call_args[1]['messages']) == 2
         assert 'paragraph breaks' in call_args[1]['messages'][0]['content']

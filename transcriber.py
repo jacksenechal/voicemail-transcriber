@@ -91,15 +91,22 @@ async def format_transcription(text: str) -> str:
                     "role": "user",
                     "content": f"Format this voice message transcription by adding paragraph breaks at natural topic boundaries:\n\n{text}"
                 }
-            ],
-            max_completion_tokens=4096
+            ]
+            # No max_completion_tokens - let the model stop naturally
         )
 
+        # Log response details for debugging
+        finish_reason = response.choices[0].finish_reason
         formatted = response.choices[0].message.content
+
+        logger.info(f"Formatting API response - finish_reason: {finish_reason}, content length: {len(formatted) if formatted else 0}")
 
         # Handle empty or None response
         if not formatted or not formatted.strip():
-            logger.warning("Formatting returned empty response, using raw transcription")
+            logger.warning(
+                f"Formatting returned empty/null content (finish_reason: {finish_reason}). "
+                f"This might be a model issue. Using raw transcription."
+            )
             return text
 
         formatted = formatted.strip()
