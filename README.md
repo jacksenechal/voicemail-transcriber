@@ -7,7 +7,7 @@ An agent that monitors your Telegram account for voice messages in any chat (inc
 - 🎤 Detects voice messages in all chats
 - 🔄 Monitors both incoming and outgoing voice messages
 - 🤖 Transcribes using OpenAI Whisper (best-in-class STT)
-- 📝 **Smart formatting**: Automatically adds paragraph breaks using GPT-4o-mini for readability
+- 📝 **Smart formatting**: Automatically adds paragraph breaks using GPT-5-nano for readability
 - 💬 Replies with transcription attached to the original voice message
 - 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
@@ -191,10 +191,10 @@ This project includes comprehensive tests to validate the critical path:
 - Whisper API supports 100+ languages automatically
 - **Costs**:
   - Whisper transcription: ~$0.006 per minute of audio
-  - GPT-4o-mini formatting: ~$0.0001 per transcription (negligible)
+  - GPT-5-nano formatting: ~$0.0001 per transcription (negligible)
   - Total: ~$0.006 per voice message
 - Use test mode to validate functionality without API costs
-- **Smart formatting**: Uses GPT-4o-mini to intelligently add paragraph breaks at natural topic boundaries
+- **Smart formatting**: Uses GPT-5-nano to intelligently add paragraph breaks at natural topic boundaries
   - Automatically enabled by default
   - Can be disabled with `FORMAT_TRANSCRIPTIONS=false`
   - Falls back to raw transcription if formatting fails
