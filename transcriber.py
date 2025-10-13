@@ -92,7 +92,6 @@ async def format_transcription(text: str) -> str:
                     "content": f"Format this voice message transcription by adding paragraph breaks at natural topic boundaries:\n\n{text}"
                 }
             ],
-            temperature=0.1,
             max_completion_tokens=4096
         )
 
