@@ -81,11 +81,11 @@ async def format_transcription(text: str) -> str:
 
         client = get_openai_client()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5-nano",
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a text formatter. Add paragraph breaks (\\n\\n) to transcriptions at natural topic boundaries. Preserve the exact text - only add line breaks. Do not add any commentary, explanations, or markdown formatting. Return ONLY the formatted text."
+                    "content": "You are a text formatter. Your task is to adjust voice transcriptions to read in a clear and natural way, while preserving the original wording, sentence structure, etc. Add paragraph breaks (\\n\\n) to transcriptions at natural topic boundaries. Correct minor verbal artifacts such as 'um', 'like', 'yeah so uh'. Adjust punctuation to correct run-on sentences. Otherwise leave the text exactly as it was. Do not add any commentary, explanations, or markdown formatting. Return ONLY the formatted text."
                 },
                 {
                     "role": "user",
@@ -93,7 +93,7 @@ async def format_transcription(text: str) -> str:
                 }
             ],
             temperature=0.1,
-            max_tokens=4096
+            max_completion_tokens=4096
         )
 
         formatted = response.choices[0].message.content.strip()

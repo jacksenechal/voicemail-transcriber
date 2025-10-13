@@ -123,8 +123,8 @@ async def test_format_transcription_model_params():
 
         # Verify the call was made with correct parameters
         call_args = mock_client.chat.completions.create.call_args
-        assert call_args[1]['model'] == 'gpt-4o-mini'
+        assert call_args[1]['model'] == 'gpt-5-nano'
         assert call_args[1]['temperature'] == 0.1
-        assert call_args[1]['max_tokens'] == 4096
+        assert call_args[1]['max_completion_tokens'] == 4096
         assert len(call_args[1]['messages']) == 2
         assert 'paragraph breaks' in call_args[1]['messages'][0]['content']
