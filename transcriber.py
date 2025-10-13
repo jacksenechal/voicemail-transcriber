@@ -95,7 +95,14 @@ async def format_transcription(text: str) -> str:
             max_completion_tokens=4096
         )
 
-        formatted = response.choices[0].message.content.strip()
+        formatted = response.choices[0].message.content
+
+        # Handle empty or None response
+        if not formatted or not formatted.strip():
+            logger.warning("Formatting returned empty response, using raw transcription")
+            return text
+
+        formatted = formatted.strip()
         logger.info(f"Formatting completed ({len(formatted)} chars)")
         return formatted
 
