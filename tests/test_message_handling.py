@@ -1,189 +1,188 @@
 """Integration tests for message handling flow."""
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from pathlib import Path
-from telethon.tl.types import MessageMediaDocument, Document, DocumentAttributeAudio
+from unittest.mock import AsyncMock, Mock, patch
 
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from transcriber import VoiceMessageContext, processed_messages
+
 
 @pytest.mark.asyncio
-async def test_handle_new_message_with_voice(mocker):
-    """Test full flow: voice message detection, download, transcription, and reply."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
-         patch('transcriber.TelegramClient') as mock_telegram_client:
+async def test_process_voice_message_success(mocker):
+    """End-to-end happy path for process_voice_message."""
+    processed_messages.clear()
 
-        # Setup OpenAI mock
-        mock_openai = Mock()
-        mock_openai_class.return_value = mock_openai
-        mock_openai.audio.transcriptions.create.return_value = "Test transcription"
+    download_media = AsyncMock()
+    reply = AsyncMock()
 
-        # Setup Telegram client mock
+    with patch('transcriber.transcribe_audio', AsyncMock(return_value="Raw transcription")), \
+         patch('transcriber.format_transcription', AsyncMock(return_value="Formatted transcription")):
+
+        context = VoiceMessageContext(
+            platform='telegram',
+            message_id='1',
+            chat_id='chat',
+            sender_name='Alice',
+            chat_name='Chat',
+            download_media=download_media,
+            reply=reply,
+        )
+
+        from transcriber import process_voice_message
+
+        await process_voice_message(context)
+
+    assert download_media.call_count == 1
+    assert reply.call_count == 1
+    assert reply.await_args.args[0].startswith("🎤 Voice message transcription")
+    assert "Formatted transcription" in reply.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_process_voice_message_handles_long_text(mocker):
+    """Ensure long transcriptions are split into multiple replies."""
+    processed_messages.clear()
+    download_media = AsyncMock()
+    reply = AsyncMock()
+
+    long_text = "Lorem ipsum " * 1000
+
+    with patch('transcriber.transcribe_audio', AsyncMock(return_value=long_text)), \
+         patch('transcriber.format_transcription', AsyncMock(side_effect=lambda text: text)):
+
+        context = VoiceMessageContext(
+            platform='telegram',
+            message_id='2',
+            chat_id='chat',
+            sender_name='Alice',
+            chat_name='Chat',
+            download_media=download_media,
+            reply=reply,
+            max_message_length=200,
+        )
+
+        from transcriber import process_voice_message
+
+        await process_voice_message(context)
+
+    assert reply.call_count > 1
+    for call in reply.await_args_list:
+        assert len(call.args[0]) <= 200 + 10  # header space
+
+
+@pytest.mark.asyncio
+async def test_process_voice_message_duplicate_skipped():
+    """Messages with duplicate processed keys are ignored."""
+    processed_messages.clear()
+    download_media = AsyncMock()
+    reply = AsyncMock()
+
+    context = VoiceMessageContext(
+        platform='telegram',
+        message_id='1',
+        chat_id='chat',
+        sender_name='Alice',
+        chat_name='Chat',
+        download_media=download_media,
+        reply=reply,
+    )
+
+    from transcriber import process_voice_message
+
+    with patch('transcriber.transcribe_audio', AsyncMock(return_value="Test")), \
+         patch('transcriber.format_transcription', AsyncMock(return_value="Test")):
+        await process_voice_message(context)
+        await process_voice_message(context)
+
+    assert download_media.call_count == 1
+    assert reply.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_process_voice_message_transcription_failure():
+    """When transcription fails the error is surfaced to the user."""
+    processed_messages.clear()
+
+    download_media = AsyncMock()
+    reply = AsyncMock()
+
+    context = VoiceMessageContext(
+        platform='telegram',
+        message_id='9',
+        chat_id='chat',
+        sender_name='Alice',
+        chat_name='Chat',
+        download_media=download_media,
+        reply=reply,
+    )
+
+    from transcriber import process_voice_message
+
+    with patch('transcriber.transcribe_audio', AsyncMock(return_value='[Transcription failed: boom]')):
+        await process_voice_message(context)
+
+    reply.assert_awaited_once()
+    assert reply.await_args.args[0].startswith("❌ [Transcription failed")
+
+
+@pytest.mark.asyncio
+async def test_telegram_handler_creates_context():
+    """Telegram handler should construct VoiceMessageContext and call processor."""
+    with patch('transcriber.TelegramClient') as mock_telegram_client, \
+         patch('transcriber.is_voice_message', AsyncMock(return_value=True)), \
+         patch('transcriber.process_voice_message', AsyncMock()) as mock_process:
+
         mock_client = Mock()
+        mock_client.add_event_handler = Mock()
         mock_telegram_client.return_value = mock_client
 
-        # Import after mocking
-        from transcriber import handle_new_message, processed_messages
-        processed_messages.clear()
+        from transcriber import TelegramVoiceTranscriber
 
-        # Create mock event with voice message
-        event = Mock()
+        handler = TelegramVoiceTranscriber()
+
         message = Mock()
-        message.id = 12345
-        message.chat_id = 67890
-
-        # Setup voice message media
-        message.media = Mock(spec=MessageMediaDocument)
-        voice_attr = Mock(spec=DocumentAttributeAudio)
-        voice_attr.voice = True
-        message.media.document = Mock(spec=Document)
-        message.media.document.attributes = [voice_attr]
-
-        event.message = message
-
-        # Mock chat and sender info
-        chat = Mock()
-        chat.title = "Test Chat"
-        event.get_chat = AsyncMock(return_value=chat)
-
-        sender = Mock()
-        sender.first_name = "John"
-        message.get_sender = AsyncMock(return_value=sender)
-
-        # Mock file operations
+        message.id = 123
+        message.chat_id = 456
         message.download_media = AsyncMock()
         message.reply = AsyncMock()
+        message.file = Mock()
+        message.file.ext = '.ogg'
+        message.get_sender = AsyncMock(return_value=Mock(first_name='Bob'))
 
-        # Mock file operations
-        mocker.patch('builtins.open', mocker.mock_open(read_data=b"fake audio"))
-        mocker.patch('pathlib.Path.unlink')
+        event = Mock()
+        event.message = message
+        event.get_chat = AsyncMock(return_value=Mock(title='My Chat'))
 
-        # Call handler
-        await handle_new_message(event)
+        await handler._handle_new_message(event)
 
-        # Verify the flow
-        assert message.download_media.called
-        assert message.reply.called
-
-        # Check reply content
-        reply_call = message.reply.call_args
-        reply_text = reply_call[0][0]
-        assert "Test transcription" in reply_text
-        assert "🎤" in reply_text
+        assert mock_process.await_count == 1
+        context = mock_process.await_args.args[0]
+        assert context.platform == 'telegram'
+        assert context.chat_name == 'My Chat'
+        assert context.sender_name == 'Bob'
 
 
 @pytest.mark.asyncio
-async def test_handle_new_message_duplicate_prevention(mocker):
-    """Test that duplicate messages are not processed."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
-         patch('transcriber.TelegramClient') as mock_telegram_client:
+async def test_telegram_handler_skips_non_voice():
+    """Non voice messages should not trigger processing."""
+    with patch('transcriber.TelegramClient') as mock_telegram_client, \
+         patch('transcriber.is_voice_message', AsyncMock(return_value=False)), \
+         patch('transcriber.process_voice_message', AsyncMock()) as mock_process:
 
-        from transcriber import handle_new_message, processed_messages
+        mock_client = Mock()
+        mock_client.add_event_handler = Mock()
+        mock_telegram_client.return_value = mock_client
 
-        # Pre-populate processed messages
-        processed_messages.clear()
-        processed_messages.add("67890_12345")
+        from transcriber import TelegramVoiceTranscriber
 
-        # Create mock event
+        handler = TelegramVoiceTranscriber()
+
         event = Mock()
-        message = Mock()
-        message.id = 12345
-        message.chat_id = 67890
+        event.message = Mock()
 
-        # Setup voice message
-        message.media = Mock(spec=MessageMediaDocument)
-        voice_attr = Mock(spec=DocumentAttributeAudio)
-        voice_attr.voice = True
-        message.media.document = Mock(spec=Document)
-        message.media.document.attributes = [voice_attr]
+        await handler._handle_new_message(event)
 
-        event.message = message
-        message.reply = AsyncMock()
-
-        # Call handler
-        await handle_new_message(event)
-
-        # Verify no reply was sent (message was skipped)
-        assert not message.reply.called
-
-
-@pytest.mark.asyncio
-async def test_handle_new_message_non_voice(mocker):
-    """Test that non-voice messages are ignored."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
-         patch('transcriber.TelegramClient') as mock_telegram_client:
-
-        from transcriber import handle_new_message, processed_messages
-        processed_messages.clear()
-
-        # Create mock event with text message (no media)
-        event = Mock()
-        message = Mock()
-        message.id = 12345
-        message.chat_id = 67890
-        message.media = None
-
-        event.message = message
-        message.reply = AsyncMock()
-
-        # Call handler
-        await handle_new_message(event)
-
-        # Verify no reply was sent
-        assert not message.reply.called
-
-
-@pytest.mark.asyncio
-async def test_handle_new_message_transcription_error(mocker):
-    """Test error handling when transcription fails."""
-    with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client, \
-         patch('transcriber.TelegramClient') as mock_telegram_client:
-
-        # Setup OpenAI to raise error
-        mock_openai = Mock()
-        mock_get_client.return_value = mock_openai
-        mock_openai.audio.transcriptions.create.side_effect = Exception("API Error")
-
-        from transcriber import handle_new_message, processed_messages
-        processed_messages.clear()
-
-        # Create mock event with voice message
-        event = Mock()
-        message = Mock()
-        message.id = 12345
-        message.chat_id = 67890
-
-        message.media = Mock(spec=MessageMediaDocument)
-        voice_attr = Mock(spec=DocumentAttributeAudio)
-        voice_attr.voice = True
-        message.media.document = Mock(spec=Document)
-        message.media.document.attributes = [voice_attr]
-
-        event.message = message
-
-        # Mock required methods
-        chat = Mock()
-        chat.title = "Test Chat"
-        event.get_chat = AsyncMock(return_value=chat)
-
-        sender = Mock()
-        sender.first_name = "John"
-        message.get_sender = AsyncMock(return_value=sender)
-
-        message.download_media = AsyncMock()
-        message.reply = AsyncMock()
-
-        mocker.patch('builtins.open', mocker.mock_open(read_data=b"fake audio"))
-        mocker.patch('pathlib.Path.unlink')
-
-        # Call handler
-        await handle_new_message(event)
-
-        # Verify error message was sent
-        assert message.reply.called
-        reply_text = message.reply.call_args[0][0]
-        assert "[Transcription failed:" in reply_text
+        assert mock_process.await_count == 0

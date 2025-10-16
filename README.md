@@ -1,6 +1,6 @@
-# Telegram Voice Message Transcriber
+# Multi-platform Voice Message Transcriber
 
-An agent that monitors your Telegram account for voice messages in any chat (incoming or outgoing), transcribes them using OpenAI's Whisper API, and replies with the transcription text.
+An agent that monitors your favourite messaging platforms for voice messages (Telegram, Slack, Signal), transcribes them using OpenAI's Whisper API, and replies with the transcription text.
 
 ## Features
 
@@ -12,6 +12,7 @@ An agent that monitors your Telegram account for voice messages in any chat (inc
 - 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
 - 🛡️ Handles errors gracefully with logging
+- 🧩 Supports Telegram via Telethon, Slack via Socket Mode, and Signal via the signal-cli REST API
 
 ## Setup
 
@@ -51,12 +52,29 @@ nano .env
 ```
 
 Fill in your credentials:
+
+**Common**
+
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `PLATFORMS`: Comma separated list of integrations to enable. Supported values: `telegram`, `slack`, `signal` (default: `telegram`).
+- `MODE`: Set to `test` or `production` (default: `production`)
+- `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
+
+**Telegram**
+
 - `TELEGRAM_API_ID`: Your Telegram API ID
 - `TELEGRAM_API_HASH`: Your Telegram API hash
 - `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
-- `OPENAI_API_KEY`: Your OpenAI API key
-- `MODE`: Set to `test` or `production` (default: `production`)
-- `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
+
+**Slack** (required when `slack` is enabled in `PLATFORMS`)
+
+- `SLACK_APP_TOKEN`: App-level token that begins with `xapp-`
+- `SLACK_BOT_TOKEN`: Bot token that begins with `xoxb-`
+
+**Signal** (requires the [signal-cli REST API](https://github.com/bbernhard/signal-cli-rest-api))
+
+- `SIGNAL_SERVICE_URL`: Base URL to the REST API (default: `http://localhost:8080`)
+- `SIGNAL_ACCOUNT`: Phone number that signal-cli is registered with
 
 ### 5. Run Tests
 
@@ -85,9 +103,9 @@ The test suite covers:
 
 ### 6. Run the Agent
 
-#### Test Mode (Safe Testing with Real Telegram)
+#### Test Mode (Safe Testing)
 
-Test mode connects to your real Telegram account but uses mock transcriptions instead of calling the OpenAI API. This lets you validate the full flow without incurring API costs.
+Test mode connects to your configured platforms but uses mock transcriptions instead of calling the OpenAI API. This lets you validate the full flow without incurring API costs.
 
 ```bash
 # Set MODE=test in your .env file, or:
@@ -129,7 +147,7 @@ python transcriber.py
 
 Once running, the agent will:
 
-1. Monitor all your Telegram chats
+1. Monitor all configured messaging platforms
 2. Detect any voice messages (sent or received)
 3. Download and transcribe them using Whisper
 4. Reply to the original voice message with the transcription
@@ -146,7 +164,9 @@ You'll see logs like:
 [2025-10-11 22:15:52] INFO: Transcription sent successfully
 ```
 
-## First Run
+## Platform-specific notes
+
+### Telegram
 
 On first run, Telegram will send you a verification code:
 1. Enter your phone number (already in .env)
@@ -155,6 +175,14 @@ On first run, Telegram will send you a verification code:
 4. If you have 2FA enabled, enter your password
 
 The session will be saved in `transcriber_session.session` for future runs.
+
+### Slack
+
+Slack support uses Socket Mode. Create an app with the Events API, install it to your workspace, and provide the `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN`. The agent replies in the same thread as the original voice note upload.
+
+### Signal
+
+Signal integration requires a running `signal-cli` REST API instance with your account registered. Set `SIGNAL_SERVICE_URL` to the REST endpoint and `SIGNAL_ACCOUNT` to the phone number. The agent polls for incoming messages and replies either directly to the sender or to the originating group.
 
 ## Stopping the Agent
 
