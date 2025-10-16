@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument, DocumentAttributeAudio
-from openai import OpenAI
+from litellm import completion, transcription
 
 # Load environment variables
 load_dotenv()
@@ -33,23 +33,45 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# OpenAI client - initialized lazily
-openai_client = None
-
-
-def get_openai_client():
-    """Get or create OpenAI client."""
-    global openai_client
-    if openai_client is None and MODE != 'test':
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    return openai_client
+def _get_api_key() -> str | None:
+    """Return the configured API key, or None if not provided."""
+    return OPENAI_API_KEY or None
 
 # Create directory for temporary voice files
 VOICE_DIR = Path('voice_messages')
 VOICE_DIR.mkdir(exist_ok=True)
 
-# Initialize Telegram client
-client = TelegramClient('transcriber_session', API_ID, API_HASH)
+# Initialize Telegram client (fallback to no-op when credentials missing)
+
+
+class NoopTelegramClient:
+    """Minimal stub used when Telegram credentials are unavailable."""
+
+    def on(self, *args, **kwargs):  # noqa: D401 - simple passthrough decorator
+        """Return the original function without registering any handlers."""
+
+        def decorator(func):
+            return func
+
+        return decorator
+
+    async def start(self, *args, **kwargs):
+        raise RuntimeError("Telegram credentials are not configured.")
+
+    async def get_me(self):
+        raise RuntimeError("Telegram credentials are not configured.")
+
+    async def run_until_disconnected(self):
+        raise RuntimeError("Telegram credentials are not configured.")
+
+
+if API_ID and API_HASH:
+    client = TelegramClient('transcriber_session', API_ID, API_HASH)
+else:
+    logger.warning(
+        "Telegram credentials missing. Using no-op Telegram client - real bot functionality is disabled."
+    )
+    client = NoopTelegramClient()
 
 # Track processed messages to avoid duplicates
 processed_messages = set()
@@ -79,8 +101,7 @@ async def format_transcription(text: str) -> str:
             logger.info("Transcription too short to need formatting")
             return text
 
-        client = get_openai_client()
-        response = client.chat.completions.create(
+        response = completion(
             model="gpt-5-nano",
             messages=[
                 {
@@ -91,13 +112,16 @@ async def format_transcription(text: str) -> str:
                     "role": "user",
                     "content": f"Format this voice message transcription by adding paragraph breaks at natural topic boundaries:\n\n{text}"
                 }
-            ]
+            ],
+            api_key=_get_api_key()
             # No max_completion_tokens - let the model stop naturally
         )
 
         # Log response details for debugging
-        finish_reason = response.choices[0].finish_reason
-        formatted = response.choices[0].message.content
+        first_choice = response.choices[0]
+        finish_reason = getattr(first_choice, "finish_reason", None)
+        message = getattr(first_choice, "message", None)
+        formatted = getattr(message, "content", None) if message is not None else None
 
         logger.info(f"Formatting API response - finish_reason: {finish_reason}, content length: {len(formatted) if formatted else 0}")
 
@@ -129,13 +153,15 @@ async def transcribe_audio(file_path: str) -> str:
             return "[TEST MODE] This is a mock transcription of the voice message."
 
         # Production mode: use real API
-        client = get_openai_client()
         with open(file_path, 'rb') as audio_file:
-            transcript = client.audio.transcriptions.create(
+            transcript_response = transcription(
                 model="whisper-1",
                 file=audio_file,
-                response_format="text"
+                response_format="text",
+                api_key=_get_api_key()
             )
+
+        transcript = getattr(transcript_response, "text", transcript_response)
         logger.info("Transcription completed successfully")
         return transcript
     except Exception as e:

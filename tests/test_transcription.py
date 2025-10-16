@@ -1,8 +1,8 @@
 """Tests for audio transcription functionality."""
 
 import pytest
-from unittest.mock import Mock, patch, mock_open, AsyncMock
-from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch, mock_open
 
 import sys
 import os
@@ -14,13 +14,10 @@ async def test_transcribe_audio_success(mocker):
     """Test successful transcription."""
     # Set MODE to production for this test
     with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client:
-
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
+         patch('transcriber.transcription') as mock_transcription:
 
         # Mock the transcription response
-        mock_client.audio.transcriptions.create.return_value = "This is a test transcription"
+        mock_transcription.return_value = SimpleNamespace(text="This is a test transcription")
 
         # Import the function after mocking
         from transcriber import transcribe_audio
@@ -32,20 +29,17 @@ async def test_transcribe_audio_success(mocker):
         result = await transcribe_audio("test_audio.ogg")
 
         assert result == "This is a test transcription"
-        assert mock_client.audio.transcriptions.create.called
+        assert mock_transcription.called
 
 
 @pytest.mark.asyncio
 async def test_transcribe_audio_api_error(mocker):
     """Test transcription with API error."""
     with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client:
-
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
+         patch('transcriber.transcription') as mock_transcription:
 
         # Mock API error
-        mock_client.audio.transcriptions.create.side_effect = Exception("API rate limit exceeded")
+        mock_transcription.side_effect = Exception("API rate limit exceeded")
 
         from transcriber import transcribe_audio
 
@@ -62,10 +56,7 @@ async def test_transcribe_audio_api_error(mocker):
 async def test_transcribe_audio_file_not_found(mocker):
     """Test transcription with missing file."""
     with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client:
-
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
+         patch('transcriber.transcription') as mock_transcription:
 
         from transcriber import transcribe_audio
 
@@ -82,13 +73,10 @@ async def test_transcribe_audio_file_not_found(mocker):
 async def test_transcribe_audio_empty_response(mocker):
     """Test transcription with empty response."""
     with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client:
-
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
+         patch('transcriber.transcription') as mock_transcription:
 
         # Mock empty transcription
-        mock_client.audio.transcriptions.create.return_value = ""
+        mock_transcription.return_value = SimpleNamespace(text="")
 
         from transcriber import transcribe_audio
 
