@@ -1,8 +1,7 @@
 """Integration tests for message handling flow."""
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from pathlib import Path
+from unittest.mock import Mock, patch, AsyncMock
 from telethon.tl.types import MessageMediaDocument, Document, DocumentAttributeAudio
 
 import sys
@@ -13,19 +12,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 @pytest.mark.asyncio
 async def test_handle_new_message_with_voice(mocker):
     """Test full flow: voice message detection, download, transcription, and reply."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
+    with patch('transcriber._transcribe_with_groq', return_value="Test transcription"), \
          patch('transcriber.TelegramClient') as mock_telegram_client:
 
-        # Setup OpenAI mock
-        mock_openai = Mock()
-        mock_openai_class.return_value = mock_openai
-        mock_openai.audio.transcriptions.create.return_value = "Test transcription"
+        mock_telegram_client.return_value = Mock()
 
-        # Setup Telegram client mock
-        mock_client = Mock()
-        mock_telegram_client.return_value = mock_client
-
-        # Import after mocking
         from transcriber import handle_new_message, processed_messages
         processed_messages.clear()
 
@@ -57,8 +48,6 @@ async def test_handle_new_message_with_voice(mocker):
         message.download_media = AsyncMock()
         message.reply = AsyncMock()
 
-        # Mock file operations
-        mocker.patch('builtins.open', mocker.mock_open(read_data=b"fake audio"))
         mocker.patch('pathlib.Path.unlink')
 
         # Call handler
@@ -78,7 +67,7 @@ async def test_handle_new_message_with_voice(mocker):
 @pytest.mark.asyncio
 async def test_handle_new_message_duplicate_prevention(mocker):
     """Test that duplicate messages are not processed."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
+    with patch('transcriber._transcribe_with_groq', return_value="Test transcription"), \
          patch('transcriber.TelegramClient') as mock_telegram_client:
 
         from transcriber import handle_new_message, processed_messages
@@ -113,7 +102,7 @@ async def test_handle_new_message_duplicate_prevention(mocker):
 @pytest.mark.asyncio
 async def test_handle_new_message_non_voice(mocker):
     """Test that non-voice messages are ignored."""
-    with patch('transcriber.OpenAI') as mock_openai_class, \
+    with patch('transcriber._transcribe_with_groq', return_value="Test transcription"), \
          patch('transcriber.TelegramClient') as mock_telegram_client:
 
         from transcriber import handle_new_message, processed_messages
@@ -140,13 +129,10 @@ async def test_handle_new_message_non_voice(mocker):
 async def test_handle_new_message_transcription_error(mocker):
     """Test error handling when transcription fails."""
     with patch('transcriber.MODE', 'production'), \
-         patch('transcriber.get_openai_client') as mock_get_client, \
+         patch('transcriber._transcribe_with_groq', side_effect=Exception("API Error")), \
          patch('transcriber.TelegramClient') as mock_telegram_client:
 
-        # Setup OpenAI to raise error
-        mock_openai = Mock()
-        mock_get_client.return_value = mock_openai
-        mock_openai.audio.transcriptions.create.side_effect = Exception("API Error")
+        mock_telegram_client.return_value = Mock()
 
         from transcriber import handle_new_message, processed_messages
         processed_messages.clear()
@@ -177,7 +163,6 @@ async def test_handle_new_message_transcription_error(mocker):
         message.download_media = AsyncMock()
         message.reply = AsyncMock()
 
-        mocker.patch('builtins.open', mocker.mock_open(read_data=b"fake audio"))
         mocker.patch('pathlib.Path.unlink')
 
         # Call handler

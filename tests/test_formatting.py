@@ -1,7 +1,8 @@
 """Tests for transcription formatting functionality."""
 
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 import sys
 import os
@@ -58,16 +59,13 @@ async def test_format_transcription_success():
     """Test successful formatting with LLM."""
     with patch('transcriber.MODE', 'production'), \
          patch('transcriber.FORMAT_TRANSCRIPTIONS', True), \
-         patch('transcriber.get_openai_client') as mock_get_client:
+         patch('transcriber.acompletion', new_callable=AsyncMock) as mock_acompletion:
 
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-
-        # Mock LLM response with paragraph breaks
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_choice = SimpleNamespace(
+            finish_reason="stop",
+            message=SimpleNamespace(content="First paragraph.\n\nSecond paragraph.\n\nThird paragraph.")
+        )
+        mock_acompletion.return_value = SimpleNamespace(choices=[mock_choice])
 
         from transcriber import format_transcription
 
@@ -76,7 +74,7 @@ async def test_format_transcription_success():
 
         # Should have paragraph breaks
         assert "\n\n" in result
-        assert mock_client.chat.completions.create.called
+        assert mock_acompletion.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -84,13 +82,9 @@ async def test_format_transcription_api_error():
     """Test that formatting falls back to raw text on error."""
     with patch('transcriber.MODE', 'production'), \
          patch('transcriber.FORMAT_TRANSCRIPTIONS', True), \
-         patch('transcriber.get_openai_client') as mock_get_client:
+         patch('transcriber.acompletion', new_callable=AsyncMock) as mock_acompletion:
 
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-
-        # Mock API error
-        mock_client.chat.completions.create.side_effect = Exception("API Error")
+        mock_acompletion.side_effect = Exception("API Error")
 
         from transcriber import format_transcription
 
@@ -106,15 +100,13 @@ async def test_format_transcription_model_params():
     """Test that formatting uses correct model and parameters."""
     with patch('transcriber.MODE', 'production'), \
          patch('transcriber.FORMAT_TRANSCRIPTIONS', True), \
-         patch('transcriber.get_openai_client') as mock_get_client:
+         patch('transcriber.acompletion', new_callable=AsyncMock) as mock_acompletion:
 
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Formatted text."
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_choice = SimpleNamespace(
+            finish_reason="stop",
+            message=SimpleNamespace(content="Formatted text.")
+        )
+        mock_acompletion.return_value = SimpleNamespace(choices=[mock_choice])
 
         from transcriber import format_transcription
 
@@ -122,9 +114,8 @@ async def test_format_transcription_model_params():
         await format_transcription(text)
 
         # Verify the call was made with correct parameters
-        call_args = mock_client.chat.completions.create.call_args
-        assert call_args[1]['model'] == 'gpt-5-nano'
-        assert 'temperature' not in call_args[1]  # gpt-5-nano doesn't support temperature
-        assert 'max_completion_tokens' not in call_args[1]  # No limit - let model stop naturally
-        assert len(call_args[1]['messages']) == 2
-        assert 'paragraph breaks' in call_args[1]['messages'][0]['content']
+        assert mock_acompletion.await_count == 1
+        kwargs = mock_acompletion.call_args.kwargs
+        assert kwargs['model'] == 'groq/llama-3.1-8b-instant'
+        assert len(kwargs['messages']) == 2
+        assert 'paragraph breaks' in kwargs['messages'][0]['content']

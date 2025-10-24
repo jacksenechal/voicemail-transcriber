@@ -1,5 +1,5 @@
 telethon==1.36.0
-openai>=2.3.0
+litellm>=1.45.0
 python-dotenv==1.0.0
 pytest==8.3.3
 pytest-asyncio==0.24.0

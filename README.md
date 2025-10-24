@@ -1,13 +1,13 @@
 # Telegram Voice Message Transcriber
 
-An agent that monitors your Telegram account for voice messages in any chat (incoming or outgoing), transcribes them using OpenAI's Whisper API, and replies with the transcription text.
+An agent that monitors your Telegram account for voice messages in any chat (incoming or outgoing), transcribes them using Groq's Whisper Large V3 Turbo via LiteLLM, and replies with the transcription text.
 
 ## Features
 
 - 🎤 Detects voice messages in all chats
 - 🔄 Monitors both incoming and outgoing voice messages
-- 🤖 Transcribes using OpenAI Whisper (best-in-class STT)
-- 📝 **Smart formatting**: Automatically adds paragraph breaks using GPT-5-nano for readability
+- 🤖 Transcribes using Groq Whisper-Large-V3-Turbo (fast STT via LiteLLM)
+- 📝 **Smart formatting**: Automatically adds paragraph breaks using Groq Llama 3.1 8B Instant for readability
 - 💬 Replies with transcription attached to the original voice message
 - 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
@@ -23,9 +23,9 @@ An agent that monitors your Telegram account for voice messages in any chat (inc
 4. Create a new application
 5. Note down your `api_id` and `api_hash`
 
-### 2. Get OpenAI API Key
+### 2. Get Groq API Key
 
-1. Go to https://platform.openai.com/api-keys
+1. Go to https://console.groq.com/keys
 2. Create a new API key
 3. Note it down (you won't be able to see it again)
 
@@ -54,7 +54,7 @@ Fill in your credentials:
 - `TELEGRAM_API_ID`: Your Telegram API ID
 - `TELEGRAM_API_HASH`: Your Telegram API hash
 - `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
-- `OPENAI_API_KEY`: Your OpenAI API key
+- `GROQ_API_KEY`: Your Groq API key (used by LiteLLM)
 - `MODE`: Set to `test` or `production` (default: `production`)
 - `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
 
@@ -87,7 +87,7 @@ The test suite covers:
 
 #### Test Mode (Safe Testing with Real Telegram)
 
-Test mode connects to your real Telegram account but uses mock transcriptions instead of calling the OpenAI API. This lets you validate the full flow without incurring API costs.
+Test mode connects to your real Telegram account but uses mock transcriptions instead of calling the Groq API. This lets you validate the full flow without incurring API costs.
 
 ```bash
 # Set MODE=test in your .env file, or:
@@ -99,7 +99,7 @@ In test mode:
 - ✅ Detects real voice messages
 - ✅ Downloads voice files
 - ✅ Replies with mock transcriptions
-- ❌ Does NOT call OpenAI API (no costs)
+- ❌ Does NOT call Groq API (no costs)
 
 You'll see `[TEST MODE]` prefix in transcription replies.
 
@@ -131,7 +131,7 @@ Once running, the agent will:
 
 1. Monitor all your Telegram chats
 2. Detect any voice messages (sent or received)
-3. Download and transcribe them using Whisper
+3. Download and transcribe them using Groq Whisper Large V3 Turbo via LiteLLM
 4. Reply to the original voice message with the transcription
 5. Clean up temporary audio files
 
@@ -167,7 +167,7 @@ The session will be saved in `transcriber_session.session` for future runs.
 
 **"Phone number invalid"**: Make sure to include country code (e.g., +1 for US)
 
-**"OpenAI API error"**: Verify your API key and check you have credits
+**"Groq API error"**: Verify your API key and check you have credits
 
 **"No voice messages detected"**: The agent only detects voice messages sent AFTER it starts running
 
@@ -176,7 +176,7 @@ The session will be saved in `transcriber_session.session` for future runs.
 This project includes comprehensive tests to validate the critical path:
 
 1. **Unit Tests** (`tests/test_voice_detection.py`): Tests voice message detection logic with various message types
-2. **Transcription Tests** (`tests/test_transcription.py`): Tests OpenAI API integration with mocks
+2. **Transcription Tests** (`tests/test_transcription.py`): Tests Groq transcription integration with mocks
 3. **Integration Tests** (`tests/test_message_handling.py`): Tests the full message handling flow
 
 **Recommended workflow:**
@@ -188,13 +188,10 @@ This project includes comprehensive tests to validate the critical path:
 
 - Voice messages are temporarily downloaded to `voice_messages/` and deleted after transcription
 - The agent keeps track of processed messages to avoid duplicate transcriptions
-- Whisper API supports 100+ languages automatically
-- **Costs**:
-  - Whisper transcription: ~$0.006 per minute of audio
-  - GPT-5-nano formatting: ~$0.0001 per transcription (negligible)
-  - Total: ~$0.006 per voice message
+- Groq Whisper Large V3 Turbo supports 100+ languages automatically
+- **Costs**: Refer to the latest Groq pricing for Whisper-Large-V3-Turbo and Llama 3.1 8B Instant usage
 - Use test mode to validate functionality without API costs
-- **Smart formatting**: Uses GPT-5-nano to intelligently add paragraph breaks at natural topic boundaries
+- **Smart formatting**: Uses Groq Llama 3.1 8B Instant (via LiteLLM) to intelligently add paragraph breaks at natural topic boundaries
   - Automatically enabled by default
   - Can be disabled with `FORMAT_TRANSCRIPTIONS=false`
   - Falls back to raw transcription if formatting fails

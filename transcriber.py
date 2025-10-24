@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument, DocumentAttributeAudio
-from openai import OpenAI
+from litellm import acompletion, transcription
 
 # Load environment variables
 load_dotenv()
@@ -21,7 +21,7 @@ load_dotenv()
 API_ID = int(os.getenv('TELEGRAM_API_ID', '0'))
 API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 PHONE = os.getenv('TELEGRAM_PHONE', '')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 MODE = os.getenv('MODE', 'production').lower()  # test or production
 FORMAT_TRANSCRIPTIONS = os.getenv('FORMAT_TRANSCRIPTIONS', 'true').lower() == 'true'
 
@@ -32,17 +32,6 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
-
-# OpenAI client - initialized lazily
-openai_client = None
-
-
-def get_openai_client():
-    """Get or create OpenAI client."""
-    global openai_client
-    if openai_client is None and MODE != 'test':
-        openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    return openai_client
 
 # Create directory for temporary voice files
 VOICE_DIR = Path('voice_messages')
@@ -58,7 +47,7 @@ processed_messages = set()
 async def format_transcription(text: str) -> str:
     """Format transcription by adding appropriate paragraph breaks using LLM.
 
-    Takes a wall-of-text transcription and uses GPT-4o-mini to intelligently
+    Takes a wall-of-text transcription and uses Groq's Llama 3.1 8B Instant to intelligently
     add paragraph breaks at natural topic boundaries.
     """
     try:
@@ -79,9 +68,8 @@ async def format_transcription(text: str) -> str:
             logger.info("Transcription too short to need formatting")
             return text
 
-        client = get_openai_client()
-        response = client.chat.completions.create(
-            model="gpt-5-nano",
+        response = await acompletion(
+            model="groq/llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",
@@ -96,8 +84,29 @@ async def format_transcription(text: str) -> str:
         )
 
         # Log response details for debugging
-        finish_reason = response.choices[0].finish_reason
-        formatted = response.choices[0].message.content
+        choices = getattr(response, 'choices', None)
+        if choices is None and hasattr(response, 'get'):
+            choices = response.get('choices', [])  # type: ignore[assignment]
+
+        if not choices:
+            logger.warning("Formatting returned no choices, using raw transcription.")
+            return text
+
+        first_choice = choices[0]
+        finish_reason = getattr(first_choice, 'finish_reason', None)
+        if finish_reason is None and isinstance(first_choice, dict):
+            finish_reason = first_choice.get('finish_reason')
+
+        message = getattr(first_choice, 'message', None)
+        if message is None and isinstance(first_choice, dict):
+            message = first_choice.get('message')
+
+        if isinstance(message, dict):
+            formatted = message.get('content')
+        else:
+            formatted = getattr(message, 'content', None)
+        if formatted is None and isinstance(first_choice, dict):
+            formatted = first_choice.get('content')
 
         logger.info(f"Formatting API response - finish_reason: {finish_reason}, content length: {len(formatted) if formatted else 0}")
 
@@ -118,8 +127,17 @@ async def format_transcription(text: str) -> str:
         return text  # Fallback to unformatted on error
 
 
+def _transcribe_with_groq(file_path: str):
+    """Run the Groq Whisper transcription synchronously."""
+    with open(file_path, 'rb') as audio_file:
+        return transcription(
+            model="groq/whisper-large-v3-turbo",
+            file=audio_file
+        )
+
+
 async def transcribe_audio(file_path: str) -> str:
-    """Transcribe audio file using OpenAI Whisper API."""
+    """Transcribe audio file using Groq Whisper API via LiteLLM."""
     try:
         logger.info(f"Transcribing {file_path}...")
 
@@ -129,15 +147,22 @@ async def transcribe_audio(file_path: str) -> str:
             return "[TEST MODE] This is a mock transcription of the voice message."
 
         # Production mode: use real API
-        client = get_openai_client()
-        with open(file_path, 'rb') as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                response_format="text"
-            )
+        transcript = await asyncio.to_thread(_transcribe_with_groq, file_path)
+
+        if hasattr(transcript, 'text'):
+            transcript_text = getattr(transcript, 'text', None)
+        elif isinstance(transcript, dict):
+            transcript_text = transcript.get('text')
+        else:
+            transcript_text = str(transcript)
+
+        if transcript_text is None:
+            transcript_text = ""
+        else:
+            transcript_text = str(transcript_text)
+
         logger.info("Transcription completed successfully")
-        return transcript
+        return transcript_text
     except Exception as e:
         logger.error(f"Transcription error: {e}")
         return f"[Transcription failed: {str(e)}]"
