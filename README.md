@@ -1,6 +1,6 @@
 # Multi-platform Voice Message Transcriber
 
-An agent that monitors your favourite messaging platforms for voice messages (Telegram, Slack, Signal), transcribes them using OpenAI's Whisper API, and replies with the transcription text.
+An agent that monitors your favourite messaging platforms for voice messages (Telegram and Signal today), transcribes them using OpenAI's Whisper API, and replies with the transcription text.
 
 ## Features
 
@@ -12,7 +12,7 @@ An agent that monitors your favourite messaging platforms for voice messages (Te
 - 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
 - 🛡️ Handles errors gracefully with logging
-- 🧩 Supports Telegram via Telethon, Slack via Socket Mode, and Signal via the signal-cli REST API
+- 🧩 Supports Telegram via Telethon and Signal via the signal-cli REST API
 
 ## Setup
 
@@ -56,7 +56,7 @@ Fill in your credentials:
 **Common**
 
 - `OPENAI_API_KEY`: Your OpenAI API key
-- `PLATFORMS`: Comma separated list of integrations to enable. Supported values: `telegram`, `slack`, `signal` (default: `telegram`).
+- `PLATFORMS`: Comma separated list of integrations to enable. Supported values: `telegram`, `signal` (default: `telegram`).
 - `MODE`: Set to `test` or `production` (default: `production`)
 - `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
 
@@ -65,11 +65,6 @@ Fill in your credentials:
 - `TELEGRAM_API_ID`: Your Telegram API ID
 - `TELEGRAM_API_HASH`: Your Telegram API hash
 - `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
-
-**Slack** (required when `slack` is enabled in `PLATFORMS`)
-
-- `SLACK_APP_TOKEN`: App-level token that begins with `xapp-`
-- `SLACK_BOT_TOKEN`: Bot token that begins with `xoxb-`
 
 **Signal** (requires the [signal-cli REST API](https://github.com/bbernhard/signal-cli-rest-api))
 
@@ -175,10 +170,6 @@ On first run, Telegram will send you a verification code:
 4. If you have 2FA enabled, enter your password
 
 The session will be saved in `transcriber_session.session` for future runs.
-
-### Slack
-
-Slack support uses Socket Mode. Create an app with the Events API, install it to your workspace, and provide the `SLACK_APP_TOKEN` and `SLACK_BOT_TOKEN`. The agent replies in the same thread as the original voice note upload.
 
 ### Signal
 

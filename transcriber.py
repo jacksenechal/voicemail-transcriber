@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """Multi-platform voice message transcriber.
 
 The original project supported Telegram voice message transcription.
 This module generalises the message handling logic so that we can support
-additional messaging platforms (Slack and Signal) while keeping the
-transcription/formatting pipeline shared between them.
+additional messaging platforms (with Signal implemented in this release)
+while keeping the transcription/formatting pipeline shared between them.
 
 Each platform is responsible for detecting voice messages and providing a
 ``VoiceMessageContext`` describing how to download the audio and reply to the
@@ -13,8 +15,8 @@ lifting: downloading the audio, sending it to Whisper, optionally formatting
 the result, splitting long replies, and posting responses back to the
 originating platform.
 
-The Telegram integration remains event-driven using Telethon, while Slack uses
-Socket Mode and Signal integrates with a running ``signal-cli`` REST API.
+The Telegram integration remains event-driven using Telethon, while Signal
+integrates with a running ``signal-cli`` REST API.
 """
 
 import os
@@ -25,22 +27,15 @@ from typing import Awaitable, Callable, Optional
 from pathlib import Path
 from datetime import datetime
 
-import aiohttp
+try:
+    import aiohttp
+except ImportError:  # pragma: no cover - optional dependency for Signal support
+    aiohttp = None  # type: ignore
+
 from dotenv import load_dotenv
 from openai import OpenAI
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument, DocumentAttributeAudio
-
-try:
-    from slack_sdk.socket_mode.aiohttp import SocketModeClient
-    from slack_sdk.socket_mode.request import SocketModeRequest
-    from slack_sdk.socket_mode.response import SocketModeResponse
-    from slack_sdk.web.async_client import AsyncWebClient
-except Exception:  # pragma: no cover - Slack is optional at runtime
-    SocketModeClient = None  # type: ignore
-    SocketModeRequest = None  # type: ignore
-    SocketModeResponse = None  # type: ignore
-    AsyncWebClient = None  # type: ignore
 
 # Load environment variables
 load_dotenv()
@@ -50,9 +45,6 @@ API_ID = int(os.getenv('TELEGRAM_API_ID', '0'))
 API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 PHONE = os.getenv('TELEGRAM_PHONE', '')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-
-SLACK_APP_TOKEN = os.getenv('SLACK_APP_TOKEN', '')
-SLACK_BOT_TOKEN = os.getenv('SLACK_BOT_TOKEN', '')
 
 SIGNAL_SERVICE_URL = os.getenv('SIGNAL_SERVICE_URL', 'http://localhost:8080').rstrip('/')
 SIGNAL_ACCOUNT = os.getenv('SIGNAL_ACCOUNT', '')
@@ -219,9 +211,9 @@ async def is_voice_message(message) -> bool:
 def split_message(text: str, max_length: int = 4096) -> list[str]:
     """Split a long message into chunks that fit a messaging platform limit.
 
-    Telegram historically limited messages to 4096 characters, while Slack and
-    Signal allow larger payloads.  The helper takes the maximum payload size as
-    an argument and splits at natural paragraph and word boundaries wherever
+    Telegram historically limited messages to 4096 characters, while Signal
+    allows larger payloads.  The helper takes the maximum payload size as an
+    argument and splits at natural paragraph and word boundaries wherever
     possible so that the resulting messages remain readable.
     """
     if len(text) <= max_length:
@@ -413,136 +405,12 @@ class TelegramVoiceTranscriber:
         await self.client.run_until_disconnected()
 
 
-class SlackVoiceTranscriber:
-    """Slack Socket Mode listener that transcribes audio attachments."""
-
-    def __init__(self, app_token: str, bot_token: str) -> None:
-        if SocketModeClient is None or AsyncWebClient is None or SocketModeResponse is None:
-            raise RuntimeError("slack_sdk must be installed for Slack support")
-
-        self.app_token = app_token
-        self.bot_token = bot_token
-        self.web_client = AsyncWebClient(token=bot_token)
-        self.socket_client = SocketModeClient(app_token=app_token, web_client=self.web_client)
-        self.socket_client.socket_mode_request_listeners.append(self._process_socket_mode_request)
-        self._stop_event = asyncio.Event()
-        self._http_session: Optional[aiohttp.ClientSession] = None
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._http_session is None or self._http_session.closed:
-            self._http_session = aiohttp.ClientSession()
-        return self._http_session
-
-    async def _process_socket_mode_request(self, client: SocketModeClient, request: SocketModeRequest) -> None:
-        if request.type == "disconnect":
-            logger.warning("Slack Socket Mode disconnect received")
-            self._stop_event.set()
-            return
-
-        if request.type != "events_api":
-            return
-
-        await client.send_socket_mode_response(SocketModeResponse(envelope_id=request.envelope_id))
-
-        event = request.payload.get('event', {})
-        if event.get('type') != 'message':
-            return
-        if event.get('bot_id'):
-            return
-        files = event.get('files') or []
-        if not files:
-            return
-
-        for file_info in files:
-            if not self._is_voice_file(file_info):
-                continue
-            await self._handle_voice_file(event, file_info)
-
-    @staticmethod
-    def _is_voice_file(file_info: dict) -> bool:
-        mimetype = file_info.get('mimetype', '')
-        filetype = (file_info.get('filetype') or '').lower()
-        if mimetype.startswith('audio/'):
-            return True
-        return filetype in {'ogg', 'opus', 'mp3', 'm4a', 'wav'}
-
-    async def _handle_voice_file(self, event: dict, file_info: dict) -> None:
-        channel_id = event.get('channel') or 'unknown-channel'
-        thread_ts = event.get('thread_ts') or event.get('ts')
-        file_id = str(file_info.get('id', event.get('ts', 'unknown')))
-
-        user_id = event.get('user')
-        sender_name = user_id or 'Unknown'
-        if user_id:
-            try:
-                user_info = await self.web_client.users_info(user=user_id)
-                profile = user_info.get('user', {}).get('profile', {})
-                sender_name = profile.get('real_name') or profile.get('display_name') or sender_name
-            except Exception as exc:  # pragma: no cover - network failure path
-                logger.warning("Failed to load Slack user info: %s", exc)
-
-        chat_name = channel_id
-        try:
-            channel_info = await self.web_client.conversations_info(channel=channel_id)
-            chat_name = channel_info.get('channel', {}).get('name') or chat_name
-        except Exception as exc:  # pragma: no cover - network failure path
-            logger.warning("Failed to load Slack channel info: %s", exc)
-
-        download_url = file_info.get('url_private_download') or file_info.get('url_private')
-        if not download_url:
-            logger.warning("Slack file %s missing download URL", file_id)
-            return
-
-        filetype = (file_info.get('filetype') or 'ogg').lower()
-
-        async def download_media(file_path: str) -> None:
-            session = await self._ensure_session()
-            headers = {"Authorization": f"Bearer {self.bot_token}"}
-            async with session.get(download_url, headers=headers) as resp:
-                resp.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    async for chunk in resp.content.iter_chunked(4096):
-                        f.write(chunk)
-
-        async def reply(text: str) -> None:
-            await self.web_client.chat_postMessage(
-                channel=channel_id,
-                text=text,
-                thread_ts=thread_ts,
-            )
-
-        context = VoiceMessageContext(
-            platform='slack',
-            message_id=f"{event.get('ts', '')}:{file_id}",
-            chat_id=channel_id,
-            sender_name=sender_name,
-            chat_name=chat_name,
-            download_media=download_media,
-            reply=reply,
-            voice_file_suffix=filetype,
-            max_message_length=35000,
-            reply_header="🎤 Voice message transcription (Slack):\n\n",
-            continuation_header="🎤 (continued on Slack):\n\n",
-            metadata={'event': event, 'file': file_info},
-        )
-
-        await process_voice_message(context)
-
-    async def start(self) -> None:
-        logger.info("Starting Slack transcriber...")
-        await self.socket_client.connect()
-        await self._stop_event.wait()
-
-    async def close(self) -> None:
-        if self._http_session and not self._http_session.closed:
-            await self._http_session.close()
-        await self.web_client.close()
-
-
 class SignalVoiceTranscriber:
     """Poll voice attachments from a signal-cli REST API instance."""
 
     def __init__(self, service_url: str, account: str) -> None:
+        if aiohttp is None:
+            raise RuntimeError("aiohttp must be installed for Signal support")
         self.service_url = service_url.rstrip('/')
         self.account = account
         self._session: Optional[aiohttp.ClientSession] = None
@@ -692,16 +560,6 @@ async def main() -> None:
             telegram = TelegramVoiceTranscriber()
             resources.append(telegram)
             tasks.append(asyncio.create_task(telegram.start()))
-
-    if 'slack' in configured_platforms:
-        if not SLACK_APP_TOKEN or not SLACK_BOT_TOKEN:
-            logger.warning("Slack platform requested but SLACK_APP_TOKEN/SLACK_BOT_TOKEN missing")
-        elif SocketModeClient is None:
-            logger.warning("Slack platform requested but slack_sdk dependency is not installed")
-        else:
-            slack = SlackVoiceTranscriber(SLACK_APP_TOKEN, SLACK_BOT_TOKEN)
-            resources.append(slack)
-            tasks.append(asyncio.create_task(slack.start()))
 
     if 'signal' in configured_platforms:
         if not SIGNAL_ACCOUNT:
