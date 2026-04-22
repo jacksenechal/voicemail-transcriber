@@ -8,6 +8,7 @@ An agent that monitors your Telegram account for voice messages in any chat (inc
 - 🔄 Monitors both incoming and outgoing voice messages
 - 🤖 Transcribes using Groq Whisper-Large-V3-Turbo (fast STT via LiteLLM)
 - 📝 **Smart formatting**: Automatically adds paragraph breaks using Groq Llama 3.1 8B Instant for readability
+- 🚫 **Skip chats**: Exclude specific chats from transcription (by ID, username, or title)
 - 💬 Replies with transcription attached to the original voice message
 - 📄 Handles long transcriptions by splitting into multiple messages
 - 🔁 Runs persistently in the background
@@ -53,10 +54,16 @@ nano .env
 Fill in your credentials:
 - `TELEGRAM_API_ID`: Your Telegram API ID
 - `TELEGRAM_API_HASH`: Your Telegram API hash
-- `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +1234567890)
+- `TELEGRAM_PHONE`: Your phone number (with country code, e.g., +123****7890)
 - `GROQ_API_KEY`: Your Groq API key (used by LiteLLM)
 - `MODE`: Set to `test` or `production` (default: `production`)
 - `FORMAT_TRANSCRIPTIONS`: Set to `true` or `false` (default: `true`) - enables smart paragraph formatting
+- `SKIP_CHATS`: Comma-separated list of chats to exclude from transcription. Supports:
+  - Chat IDs (e.g., `699561995` for DMs, `-1001234567890` for groups/channels)
+  - Usernames with `@` prefix (e.g., `@channel_name`)
+  - Usernames without prefix (e.g., `channel_name`)
+  - Chat titles (e.g., `Family Chat`)
+  - Example: `SKIP_CHATS=699561995,-1001234567890,@channel_name,Family Chat`
 
 ### 5. Run Tests
 
@@ -82,6 +89,7 @@ The test suite covers:
 - ✅ Message handling flow (download, transcribe, reply)
 - ✅ Error handling and duplicate prevention
 - ✅ Edge cases (non-voice messages, API failures)
+- ✅ Skip chats (exclusion by ID, username, or title)
 
 ### 6. Run the Agent
 
@@ -199,6 +207,10 @@ This project includes comprehensive tests to validate the critical path:
 - **Long transcriptions**: Automatically splits messages over 4096 characters (Telegram's limit) into multiple replies
 - **Comprehensive logging**: All errors, downloads, and transcriptions are logged with full context
 - **Error handling**: Graceful fallbacks for API failures, network issues, and edge cases
+- **Skip chats**: Use `SKIP_CHATS` in `.env` to exclude specific chats from transcription
+  - Useful when another bot (e.g., Hermes) already handles transcription in certain chats
+  - Matches by chat ID, `@username`, or chat title (case-insensitive)
+  - Logged as `Skipping voice message in 'Chat Name' (chat in skip list)`
 
 ## License
 

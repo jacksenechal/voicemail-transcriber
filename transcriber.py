@@ -21,9 +21,15 @@ load_dotenv()
 API_ID = int(os.getenv('TELEGRAM_API_ID', '0'))
 API_HASH = os.getenv('TELEGRAM_API_HASH', '')
 PHONE = os.getenv('TELEGRAM_PHONE', '')
-GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
+GROQ_API_KEY=os.getenv('GROQ_API_KEY', '')
 MODE = os.getenv('MODE', 'production').lower()  # test or production
 FORMAT_TRANSCRIPTIONS = os.getenv('FORMAT_TRANSCRIPTIONS', 'true').lower() == 'true'
+
+# Chats to skip (comma-separated list of chat IDs or @username)
+# Messages in these chats will not be transcribed.
+SKIP_CHATS = [
+    c.strip() for c in os.getenv('SKIP_CHATS', '').split(',') if c.strip()
+]
 
 # Setup logging
 logging.basicConfig(
@@ -235,6 +241,43 @@ def split_message(text: str, max_length: int = 4096) -> list[str]:
     return chunks
 
 
+def should_skip_chat(chat_id, chat) -> bool:
+    """Check if a chat should be skipped based on SKIP_CHATS config.
+
+    Supports matching by:
+    - Numeric chat ID (e.g. '699561995' or '-1001234567890')
+    - Username with @ prefix (e.g. '@channel_name')
+    - Username without @ prefix (e.g. 'channel_name')
+    - Chat title (exact match, case-insensitive)
+    """
+    if not SKIP_CHATS:
+        return False
+
+    chat_id_str = str(chat_id)
+    username = (getattr(chat, 'username', None) or '').lower()
+    title = (getattr(chat, 'title', None) or '').lower()
+
+    # Also check first_name for DMs
+    first_name = (getattr(chat, 'first_name', None) or '').lower()
+
+    for skip in SKIP_CHATS:
+        skip_lower = skip.lower()
+        # Match by numeric chat ID
+        if skip_lower == chat_id_str:
+            return True
+        # Match by @username or username
+        if skip_lower.startswith('@'):
+            if skip_lower[1:] == username:
+                return True
+        elif skip_lower == username:
+            return True
+        # Match by chat title (for groups/channels) or first_name (for DMs)
+        if skip_lower == title or skip_lower == first_name:
+            return True
+
+    return False
+
+
 @client.on(events.NewMessage)
 async def handle_new_message(event):
     """Handle incoming messages and transcribe voice messages."""
@@ -261,6 +304,11 @@ async def handle_new_message(event):
     except:
         chat_name = "Unknown"
         sender_name = "Unknown"
+
+    # Check if this chat is in the skip list
+    if should_skip_chat(message.chat_id, chat):
+        logger.info(f"Skipping voice message in '{chat_name}' (chat in skip list)")
+        return
 
     logger.info(f"Voice message detected in '{chat_name}' from {sender_name}")
 
