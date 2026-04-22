@@ -310,7 +310,7 @@ async def handle_new_message(event):
         logger.info(f"Skipping voice message in '{chat_name}' (chat in skip list)")
         return
 
-    logger.info(f"Voice message detected in '{chat_name}' from {sender_name}")
+    logger.info(f"Voice message detected in '{chat_name}' (chat_id={message.chat_id}) from {sender_name}")
 
     file_path = None
     try:
